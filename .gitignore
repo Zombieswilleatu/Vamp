@@ -1,0 +1,27 @@
+# GameMaker Studio 2 files
+options/*/
+cache/*/
+*.yy.meta
+
+# Temp files
+*.yy.backup
+*.yy~
+
+# Build outputs
+*.exe
+*.zip
+*.dll
+*.html5
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+debug_log.txt
+*.log
+
+# IDE settings
+.vscode/
+*.code-workspace
