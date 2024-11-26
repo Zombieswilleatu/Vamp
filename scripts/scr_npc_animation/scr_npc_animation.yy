@@ -1,9 +1,9 @@
 {
   "$GMScript":"v1",
-  "%Name":"scr_animate_npc",
+  "%Name":"scr_npc_animation",
   "isCompatibility":false,
   "isDnD":false,
-  "name":"scr_animate_npc",
+  "name":"scr_npc_animation",
   "parent":{
     "name":"NPC SCRIPTS",
     "path":"folders/Scripts/NPC SCRIPTS.yy",

@@ -1,25 +1,5 @@
-// Step Event for obj_player
-
 // Inherit from parent first
 event_inherited();
-// Before calling the script
-// At the beginning of the Step Event
-show_debug_message("Player position: (" + string(x) + ", " + string(y) + ")");
-show_debug_message("Player speed: (" + string(hspeed) + ", " + string(vspeed) + ")");
-
-// After the movement and collision handling
-show_debug_message("Player position after movement: (" + string(x) + ", " + string(y) + ")");
-show_debug_message("Player speed after movement: (" + string(hspeed) + ", " + string(vspeed) + ")");
-
-// Check for collisions with obj_collision
-var collision_wall = place_meeting(x + hspeed, y + vspeed, obj_collision);
-
-if (collision_wall) {
-    show_debug_message("Collided with wall at (" + string(x) + ", " + string(y) + ")");
-    // Handle collision response here
-} else {
-    show_debug_message("No collision with wall");
-}
 
 // Save current position
 var previous_x = x;
@@ -39,7 +19,7 @@ if (h_input != 0 || v_input != 0) {
     intended_hspeed = (h_input / len) * move_speed;
     intended_vspeed = (v_input / len) * move_speed;
     is_moving = true;
-    
+
     // Animation direction handling remains the same
     if (abs(h_input) > abs(v_input)) {
         if (h_input > 0) {
@@ -89,7 +69,7 @@ if (h_input != 0 || v_input != 0) {
 if (is_moving) {
     // Try full movement first
     var can_move = !place_meeting(x + intended_hspeed, y + intended_vspeed, obj_collision);
-    
+
     if (can_move) {
         x += intended_hspeed;
         y += intended_vspeed;
@@ -98,13 +78,13 @@ if (is_moving) {
         if (!place_meeting(x + intended_hspeed, y, obj_collision)) {
             x += intended_hspeed;
         }
-        
+
         // Try vertical movement
         if (!place_meeting(x, y + intended_vspeed, obj_collision)) {
             y += intended_vspeed;
         }
     }
-    
+
     // Handle NPC collisions with smoother separation
     if (place_meeting(x, y, obj_villager_1)) {
         var inst = instance_place(x, y, obj_villager_1);

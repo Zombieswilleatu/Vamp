@@ -1,9 +1,9 @@
 {
   "$GMScript":"v1",
-  "%Name":"scr_npc_debug_gui",
+  "%Name":"scr_initialize_pathfinding",
   "isCompatibility":false,
   "isDnD":false,
-  "name":"scr_npc_debug_gui",
+  "name":"scr_initialize_pathfinding",
   "parent":{
     "name":"NPC SCRIPTS",
     "path":"folders/Scripts/NPC SCRIPTS.yy",

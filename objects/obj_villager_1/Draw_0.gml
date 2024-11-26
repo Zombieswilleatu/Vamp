@@ -1,39 +1,66 @@
 // Draw Event of obj_villager_1
-
 draw_self(); // Draw the NPC sprite
 
-// Visualize the path and unwalkable tiles when TAB is pressed
+// Visualize the new pathfinding system when TAB is pressed
 if (keyboard_check(vk_tab)) {
-    // Draw the path
-    if (variable_instance_exists(id, "path_points") && array_length(path_points) > 1) {
-        draw_set_color(c_aqua);
+    // Draw the current path
+    if (variable_instance_exists(id, "current_path") && array_length(current_path) > 1) {
+        draw_set_color(c_lime);
         draw_set_alpha(0.8);
-        for (var i = 0; i < array_length(path_points) - 1; i++) {
-            var point_current = path_points[i];
-            var point_next = path_points[i + 1];
-            draw_line_width(point_current.x, point_current.y, point_next.x, point_next.y, 2);
+        
+        // Draw path lines and nodes
+        for (var i = 1; i < array_length(current_path); i++) {
+            var prev = current_path[i - 1];
+            var curr = current_path[i];
+            draw_line_width(prev.x, prev.y, curr.x, curr.y, 2); // Connect path points
+            draw_circle(curr.x, curr.y, 3, false); // Node points
         }
-        draw_set_alpha(1);
-        draw_set_color(c_white);
+        
+        // Highlight the current target node
+        if (current_path_index < array_length(current_path)) {
+            draw_set_color(c_yellow);
+            var target = current_path[current_path_index];
+            draw_circle(target.x, target.y, 5, false);
+        }
     }
 
-    // Draw only unwalkable (blocked) cells
-    var cell_count_x = ceil(room_width / global.cell_size);
-    var cell_count_y = ceil(room_height / global.cell_size);
-
-    draw_set_color(c_red);
-    for (var cell_x = 0; cell_x < cell_count_x; cell_x++) {
-        for (var cell_y = 0; cell_y < cell_count_y; cell_y++) {
-            // Check if the cell is blocked
-            if (mp_grid_get_cell(global.path_grid, cell_x, cell_y) == 1) {
-                var draw_x = cell_x * global.cell_size;
-                var draw_y = cell_y * global.cell_size;
-                draw_rectangle(draw_x, draw_y, draw_x + global.cell_size, draw_y + global.cell_size, false);
+    // Draw cells from the new navigation grid
+    if (variable_global_exists("pathfinding") && 
+        variable_global_exists("grid") && 
+        global.pathfinding != undefined && 
+        array_length(global.pathfinding.nodes) > 0) {
+        
+        draw_set_color(c_purple);
+        draw_set_alpha(0.2);
+        
+        for (var i = 0; i < global.grid.width; i++) {
+            for (var j = 0; j < global.grid.height; j++) {
+                if (!global.pathfinding.nodes[i][j].walkable) {
+                    var draw_x = i * global.cell_size;
+                    var draw_y = j * global.cell_size;
+                    draw_rectangle(draw_x, draw_y, draw_x + global.cell_size, draw_y + global.cell_size, true);
+                }
             }
         }
-    }
 
-    // Reset drawing settings
-    draw_set_alpha(1);
-    draw_set_color(c_white);
+        // Debug NPC position in grid
+        draw_set_color(c_white);
+        draw_set_alpha(1);
+
+        var debug_x = x - 50;
+        var debug_y = y - 40;
+
+        var current_grid_x = floor(x / global.cell_size);
+        var current_grid_y = floor(y / global.cell_size);
+
+        draw_text(debug_x, debug_y, "Grid Pos: " + string(current_grid_x) + "," + string(current_grid_y));
+        draw_text(debug_x, debug_y + 15, "Path Length: " + string(array_length(current_path)));
+        if (variable_instance_exists(id, "fallback_mode")) {
+            draw_text(debug_x, debug_y + 30, "Mode: " + (fallback_mode ? "Fallback" : "Normal"));
+        }
+    }
 }
+
+// Reset draw properties
+draw_set_alpha(1);
+draw_set_color(c_white);
