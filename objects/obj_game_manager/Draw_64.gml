@@ -9,3 +9,5 @@ var y_pos = 10;                                             // 10px padding from
 
 // Draw the FPS text
 draw_text(x_pos, y_pos, "FPS: " + string(global.fps));
+
+

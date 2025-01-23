@@ -1,15 +1,19 @@
-/// ROOM END EVENT - obj_game_manager
-function cleanup_global_search_system() {
-    if (variable_global_exists("path_grid")) {
-        mp_grid_destroy(global.path_grid);
+// Cleanup function - should be called when shutting down
+function cleanup_pathfinding() {
+    if (variable_global_exists("pf_system")) {
+        if (ds_exists(global.pf_system.nodes, ds_type_grid)) {
+            ds_grid_destroy(global.pf_system.nodes);
+        }
+        if (ds_exists(global.pf_system.open_list, ds_type_priority)) {
+            ds_priority_destroy(global.pf_system.open_list);
+        }
+        global.pf_system = undefined;
     }
-    if (variable_global_exists("global_searched_sectors")) {
-        ds_grid_destroy(global.global_searched_sectors);
-    }
-    if (variable_global_exists("global_sectors_in_progress")) {
-        ds_grid_destroy(global.global_sectors_in_progress);
-    }
-    if (variable_global_exists("region_grid")) {
-        ds_grid_destroy(global.region_grid);
+
+    if (variable_global_exists("fallback_cache")) {
+        if (ds_exists(global.fallback_cache, ds_type_map)) {
+            ds_map_destroy(global.fallback_cache);
+        }
+        global.fallback_cache = undefined;
     }
 }

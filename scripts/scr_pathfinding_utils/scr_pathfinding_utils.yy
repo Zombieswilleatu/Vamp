@@ -1,9 +1,9 @@
 {
   "$GMScript":"v1",
-  "%Name":"scr_helper_functions",
+  "%Name":"scr_pathfinding_utils",
   "isCompatibility":false,
   "isDnD":false,
-  "name":"scr_helper_functions",
+  "name":"scr_pathfinding_utils",
   "parent":{
     "name":"NPC SCRIPTS",
     "path":"folders/Scripts/NPC SCRIPTS.yy",

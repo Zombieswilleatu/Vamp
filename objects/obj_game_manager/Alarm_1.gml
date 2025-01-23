@@ -12,7 +12,7 @@ function map_regions_after_init() {
             var start_sector_x = floor(x / global.sector_size);
             var start_sector_y = floor(y / global.sector_size);
             current_sector = find_nearest_unsearched_sector(start_sector_x, start_sector_y);
-            search_state = "move_to_sector";  // Force state change
+            //search_state = "move_to_sector";  // Force state change
             show_debug_message("NPC " + string(id) + " initialized with sector: " + 
                              string(current_sector.x) + "," + string(current_sector.y));
         }

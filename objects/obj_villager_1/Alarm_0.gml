@@ -1,23 +1,13 @@
-// Alarm 0 Event for obj_villager_1
-if (!variable_global_exists("cell_size") || 
-    !variable_global_exists("grid") || 
-    !variable_global_exists("navigation_grid") ||
-    !variable_global_exists("zone_maps") ||
-    !global.grid.initialized || 
-    global.navigation_grid == undefined) {
-    
-    show_debug_message("Waiting for initialization... Cell size exists: " + 
-                      string(variable_global_exists("cell_size")) +
-                      ", Grid exists: " + string(variable_global_exists("grid")));
-    alarm[0] = 60; // Increased retry delay
+if (!variable_global_exists("cell_size") || !variable_global_exists("nav_grid")) {
+    show_debug_message("Alarm[0] - Waiting for core initialization...");
+    alarm[0] = 60;
     exit;
 }
 
-if (!initialized) {
-    create_villager_variables();
-    create_debug_variables();
-    create_detection_variables();
-    initialized = true;
-    show_debug_message("Villager fully initialized!");
-    alarm[1] = 1;
-}
+show_debug_message("Alarm[0] - All checks passed, initializing villager");
+create_detection_variables(); // Ensure detection variables are initialized first
+create_debug_variables();     // Then debug variables
+create_villager_variables();
+initialized = true;
+show_debug_message("Villager fully initialized - ID: " + string(id));
+alarm[1] = 1;

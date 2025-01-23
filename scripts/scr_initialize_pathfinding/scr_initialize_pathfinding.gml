@@ -1,217 +1,466 @@
-function scr_initialize_pathfinding() {
-    if (!global.grid || !global.grid.width || !global.grid.height) {
-        show_debug_message("Error: Global grid dimensions are not set.");
-        return;
-    }
+/*************************************************************************
+ *   PATHFINDING SYSTEM - OPTIMIZED VERSION
+ *************************************************************************/
 
-    global.pathfinding = {
-        nodes: [],
-        open_list: ds_priority_create(),
-        closed_list: ds_map_create(),
-        path_cache: ds_map_create(),
-        path_queue: ds_queue_create(),
-        cache_lifetime: 300,
-        cache_timestamps: ds_map_create(),
-        current_frame_paths: 0,
-        total_time_this_frame: 0,
-        node_grid_size: global.cell_size, // Use the same cell size
-        max_search_iterations: 1000,
-        max_time_per_path: (1000 / room_speed) / 2,
-        path_smoothing: true
-    };
+// 1) MACROS & GLOBAL VARS
+#macro NAV_CELL_WALKABLE 1
+#macro NAV_CELL_UNWALKABLE 0
+#macro NAV_CELL_ENTITY_PRESENT 2
 
-    for (var i = 0; i < global.grid.width; i++) {
-        global.pathfinding.nodes[i] = [];
-        for (var j = 0; j < global.grid.height; j++) {
-            global.pathfinding.nodes[i][j] = {
-                x: i,
-                y: j,
-                g_cost: 0,
-                h_cost: 0,
-                f_cost: 0,
-                walkable: check_node_walkable(i, j),
-                movement_cost: 1,
-                parent: noone, // Ensure a valid default value
-                world_x: i * global.pathfinding.node_grid_size,
-                world_y: j * global.pathfinding.node_grid_size
-            };
-        }
+#macro PF_MAX_ITERATIONS 2000
+#macro PF_MAX_TIME_MS 128
+#macro PF_INIT_COST 9999999
+#macro PF_VISIT_NONE -1
+#macro PF_COST_STRAIGHT 10
+#macro TILE_SIZE 32
+#macro GRID_CELL_SIZE 32
+
+globalvar PF_DIRECTIONS;
+
+/****************************************************************************
+ * 2) INIT FUNCTION
+ ****************************************************************************/
+function pathfinding_system_init() {
+    if (!variable_global_exists("PathfindingSystem")) {
+        global.PathfindingSystem = {
+            nav_grid: undefined,
+            grid_width: 0,
+            grid_height: 0,
+            cell_size: GRID_CELL_SIZE,
+            
+            // Cache grids
+            collision_cache: undefined,
+            wall_counts: undefined,
+            
+            // Pathfinding data structures
+            visit_map: undefined,
+            g_cost_map: undefined,
+            parent_x_map: undefined,
+            parent_y_map: undefined,
+            
+            current_visit_id: 0,
+            initialized: false,
+            debug_mode: false,
+            
+            // Queue system
+            path_requests: ds_queue_create(),
+            max_requests_per_frame: 2,
+            requests_this_frame: 0,
+            frame_start_time: get_timer()
+        };
     }
-    scr_setup_collision_system();
+    
+    if (global.PathfindingSystem.initialized) {
+        show_debug_message("[Pathfinding] System already initialized.");
+        return true;
+    }
+    
+    PF_DIRECTIONS = [
+        { dx:  0, dy: -1, cost: PF_COST_STRAIGHT },       // Up
+        { dx:  1, dy: -1, cost: PF_COST_STRAIGHT * 1.4 }, // Up-Right
+        { dx:  1, dy:  0, cost: PF_COST_STRAIGHT },       // Right
+        { dx:  1, dy:  1, cost: PF_COST_STRAIGHT * 1.4 }, // Down-Right
+        { dx:  0, dy:  1, cost: PF_COST_STRAIGHT },       // Down
+        { dx: -1, dy:  1, cost: PF_COST_STRAIGHT * 1.4 }, // Down-Left
+        { dx: -1, dy:  0, cost: PF_COST_STRAIGHT },       // Left
+        { dx: -1, dy: -1, cost: PF_COST_STRAIGHT * 1.4 }  // Up-Left
+    ];
+    
+    global.PathfindingSystem.visit_map    = ds_grid_create(1, 1);
+    global.PathfindingSystem.g_cost_map   = ds_grid_create(1, 1);
+    global.PathfindingSystem.parent_x_map = ds_grid_create(1, 1);
+    global.PathfindingSystem.parent_y_map = ds_grid_create(1, 1);
+    
+    global.PathfindingSystem.initialized = true;
+    show_debug_message("[Pathfinding] Initialized with cell_size: " + string(GRID_CELL_SIZE));
+    return true;
 }
 
-function check_node_walkable(grid_x, grid_y) {
-    if (grid_x < 0 || grid_x >= array_length(global.navigation_grid) ||
-        grid_y < 0 || grid_y >= array_length(global.navigation_grid[grid_x])) {
+/****************************************************************************
+ * 3) CREATE THE NAVIGATION GRID
+ ****************************************************************************/
+function pathfinding_create_grid() {
+    var pfs = global.PathfindingSystem;
+    if (!pfs.initialized) {
+        show_debug_message("[Pathfinding] ERROR: System not initialized!");
         return false;
     }
-    return global.navigation_grid[grid_x][grid_y] == 1;
-}
-
-function line_clear(start_x, start_y, end_x, end_y) {
-    var dist = point_distance(start_x, start_y, end_x, end_y);
-    var steps = ceil(dist / global.pathfinding.node_grid_size);
-
-    for (var i = 0; i <= steps; i++) {
-        var t = i / steps;
-        var check_x = lerp(start_x, end_x, t);
-        var check_y = lerp(start_y, end_y, t);
-
-        var grid_x = floor(check_x / global.pathfinding.node_grid_size);
-        var grid_y = floor(check_y / global.pathfinding.node_grid_size);
-
-        if (!check_node_walkable(grid_x, grid_y)) {
-            return false;
-        }
+    
+    var unwalkable_layer = layer_get_id("Tile_unwalkable");
+    var walkable_layer   = layer_get_id("Tile_walkable");
+    if (unwalkable_layer == -1 || walkable_layer == -1) {
+        show_debug_message("[Pathfinding] ERROR: Could not find required tile layers.");
+        return false;
     }
-    return true;
-}
-
-function get_node_from_world_pos(world_x, world_y, entity = noone) {
-    var grid_x = floor(world_x / global.pathfinding.node_grid_size);
-    var grid_y = floor(world_y / global.pathfinding.node_grid_size);
-
-    grid_x = clamp(grid_x, 0, global.grid.width - 1);
-    grid_y = clamp(grid_y, 0, global.grid.height - 1);
-
-    return global.pathfinding.nodes[grid_x][grid_y];
-}
-
-function calculate_distance(node_a, node_b) {
-    var dx = abs(node_a.x - node_b.x);
-    var dy = abs(node_a.y - node_b.y);
-    return (dx + dy) * 10 + min(dx, dy) * 4;
-}
-
-function is_diagonal_clear(current_x, current_y, neighbor_x, neighbor_y) {
-    if (neighbor_x != current_x && neighbor_y != current_y) {
-        var node1_walkable = check_node_walkable(current_x, neighbor_y);
-        var node2_walkable = check_node_walkable(neighbor_x, current_y);
-        return node1_walkable && node2_walkable;
+    
+    var unwalkable_map = layer_tilemap_get_id(unwalkable_layer);
+    var walkable_map   = layer_tilemap_get_id(walkable_layer);
+    
+    // Calculate grid dimensions
+    var tile_grid_w = tilemap_get_width(unwalkable_map);
+    var tile_grid_h = tilemap_get_height(unwalkable_map);
+    var grid_w = tile_grid_w * (TILE_SIZE / GRID_CELL_SIZE);
+    var grid_h = tile_grid_h * (TILE_SIZE / GRID_CELL_SIZE);
+    
+    // Clear old grids if they exist
+    if (pfs.nav_grid != undefined) ds_grid_destroy(pfs.nav_grid);
+    if (pfs.collision_cache != undefined) ds_grid_destroy(pfs.collision_cache);
+    if (pfs.wall_counts != undefined) ds_grid_destroy(pfs.wall_counts);
+    
+    // Create new grids
+    pfs.nav_grid = ds_grid_create(grid_w, grid_h);
+    pfs.collision_cache = ds_grid_create(grid_w, grid_h);
+    pfs.wall_counts = ds_grid_create(grid_w, grid_h);
+    
+    pfs.grid_width = grid_w;
+    pfs.grid_height = grid_h;
+    
+    ds_grid_clear(pfs.nav_grid, NAV_CELL_UNWALKABLE);
+    ds_grid_clear(pfs.collision_cache, true);
+    ds_grid_clear(pfs.wall_counts, 0);
+    
+    // Remove old collisions
+    with (obj_collision) {
+        instance_destroy();
     }
-    return true;
-}
-
-function find_path(start_x, start_y, end_x, end_y, entity = noone) {
-    ds_priority_clear(global.pathfinding.open_list);
-    ds_map_clear(global.pathfinding.closed_list);
-
-    var start_node = get_node_from_world_pos(start_x, start_y, entity);
-    var end_node = get_node_from_world_pos(end_x, end_y, entity);
-
-    if (!start_node || !end_node || !start_node.walkable || !end_node.walkable) {
-        show_debug_message("Invalid start or end node for pathfinding.");
-        return [];
-    }
-
-    start_node.g_cost = 0;
-    start_node.h_cost = calculate_distance(start_node, end_node);
-    start_node.f_cost = start_node.h_cost;
-    start_node.parent = noone;
-
-    ds_priority_add(global.pathfinding.open_list, start_node, start_node.f_cost);
-
-    while (!ds_priority_empty(global.pathfinding.open_list)) {
-        var current = ds_priority_delete_min(global.pathfinding.open_list);
-
-        if (current.x == end_node.x && current.y == end_node.y) {
-            return reconstruct_path(current, entity);
-        }
-
-        var key = string(current.x) + "," + string(current.y);
-        ds_map_add(global.pathfinding.closed_list, key, current);
-
-        for (var dx = -1; dx <= 1; dx++) {
-            for (var dy = -1; dy <= 1; dy++) {
-                if (dx == 0 && dy == 0) continue;
-
-                var neighbor_x = current.x + dx;
-                var neighbor_y = current.y + dy;
-
-                if (neighbor_x < 0 || neighbor_x >= global.grid.width ||
-                    neighbor_y < 0 || neighbor_y >= global.grid.height) continue;
-
-                var neighbor = global.pathfinding.nodes[neighbor_x][neighbor_y];
-                var neighbor_key = string(neighbor_x) + "," + string(neighbor_y);
-
-                if (!neighbor.walkable || ds_map_exists(global.pathfinding.closed_list, neighbor_key)) continue;
-
-                if (!is_diagonal_clear(current.x, current.y, neighbor_x, neighbor_y)) continue;
-
-                var movement_cost = current.g_cost + neighbor.movement_cost * ((dx != 0 && dy != 0) ? 1.4 : 1);
-
-                var in_open_list = ds_priority_find_priority(global.pathfinding.open_list, neighbor);
-                if (!in_open_list || movement_cost < neighbor.g_cost) {
-                    neighbor.g_cost = movement_cost;
-                    neighbor.h_cost = calculate_distance(neighbor, end_node);
-                    neighbor.f_cost = neighbor.g_cost + neighbor.h_cost;
-                    neighbor.parent = current;
-
-                    if (!in_open_list) {
-                        ds_priority_add(global.pathfinding.open_list, neighbor, neighbor.f_cost);
+    
+    // Fill the nav grid and create collision objects
+    for (var tile_x = 0; tile_x < tile_grid_w; tile_x++) {
+        for (var tile_y = 0; tile_y < tile_grid_h; tile_y++) {
+            var tile_walkable   = tilemap_get(walkable_map,   tile_x, tile_y);
+            var tile_unwalkable = tilemap_get(unwalkable_map, tile_x, tile_y);
+            
+            var grid_base_x = tile_x * (TILE_SIZE / GRID_CELL_SIZE);
+            var grid_base_y = tile_y * (TILE_SIZE / GRID_CELL_SIZE);
+            
+            if (tile_walkable != 0 && tile_unwalkable == 0) {
+                // Mark walkable
+                for (var dx = 0; dx < (TILE_SIZE / GRID_CELL_SIZE); dx++) {
+                    for (var dy = 0; dy < (TILE_SIZE / GRID_CELL_SIZE); dy++) {
+                        ds_grid_set(pfs.nav_grid, grid_base_x + dx, grid_base_y + dy, NAV_CELL_WALKABLE);
+                        ds_grid_set(pfs.collision_cache, grid_base_x + dx, grid_base_y + dy, false);
+                    }
+                }
+            } else if (tile_unwalkable != 0) {
+                // Mark unwalkable and create collision
+                var world_x = tile_x * TILE_SIZE;
+                var world_y = tile_y * TILE_SIZE;
+                instance_create_layer(world_x, world_y, "CollisionLayer", obj_collision);
+                
+                for (var dx = 0; dx < (TILE_SIZE / GRID_CELL_SIZE); dx++) {
+                    for (var dy = 0; dy < (TILE_SIZE / GRID_CELL_SIZE); dy++) {
+                        ds_grid_set(pfs.nav_grid, grid_base_x + dx, grid_base_y + dy, NAV_CELL_UNWALKABLE);
+                        ds_grid_set(pfs.collision_cache, grid_base_x + dx, grid_base_y + dy, true);
                     }
                 }
             }
         }
     }
-
-    show_debug_message("No path found!");
-    return [];
-}
-
-function reconstruct_path(end_node, entity) {
-    var raw_path = [];
-    var current = end_node;
-
-    while (current != noone) {
-        var world_pos = grid_to_world_pos(current.x, current.y, entity);
-        array_insert(raw_path, 0, {
-            x: world_pos.x,
-            y: world_pos.y,
-            grid_x: current.x,
-            grid_y: current.y
-        });
-        current = current.parent;
-    }
-
-    if (array_length(raw_path) < 2) return raw_path;
-
-    var squared_path = [];
-    array_push(squared_path, raw_path[0]);  // Add start point
-
-    for (var i = 1; i < array_length(raw_path) - 1; i++) {
-        var prev = raw_path[i - 1];
-        var curr = raw_path[i];
-        var next = raw_path[i + 1];
-
-        var dx1 = sign(curr.grid_x - prev.grid_x);
-        var dy1 = sign(curr.grid_y - prev.grid_y);
-        var dx2 = sign(next.grid_x - curr.grid_x);
-        var dy2 = sign(next.grid_y - curr.grid_y);
-
-        if (dx1 != dx2 || dy1 != dy2) {  // Direction change detected
-            array_push(squared_path, curr);
+    
+    // Calculate wall counts
+    for (var gx = 0; gx < grid_w; gx++) {
+        for (var gy = 0; gy < grid_h; gy++) {
+            var wall_count = 0;
+            for (var wx = -1; wx <= 1; wx++) {
+                for (var wy = -1; wy <= 1; wy++) {
+                    if (wx == 0 && wy == 0) continue;
+                    var check_x = gx + wx;
+                    var check_y = gy + wy;
+                    if (validate_grid_coordinates(check_x, check_y)) {
+                        if (ds_grid_get(pfs.nav_grid, check_x, check_y) == NAV_CELL_UNWALKABLE) {
+                            wall_count++;
+                        }
+                    }
+                }
+            }
+            ds_grid_set(pfs.wall_counts, gx, gy, wall_count);
         }
     }
-
-    array_push(squared_path, raw_path[array_length(raw_path) - 1]);  // Add end point
-    return squared_path;
+    
+    show_debug_message("[Pathfinding] Grid created: " + string(grid_w) + "x" + string(grid_h));
+    return true;
 }
 
-function grid_to_world_pos(grid_x, grid_y, entity) {
+/****************************************************************************
+ * 4) HELPER FUNCTIONS
+ ****************************************************************************/
+function coords_to_index(coord_x, coord_y) {
+    return coord_y * global.PathfindingSystem.grid_width + coord_x;
+}
+
+function index_to_coords(index) {
+    var pfs = global.PathfindingSystem;
+    var coord_x = index mod pfs.grid_width;
+    var coord_y = floor(index / pfs.grid_width);
+    return { x: coord_x, y: coord_y };
+}
+
+function validate_grid_coordinates(coord_x, coord_y) {
+    var pfs = global.PathfindingSystem;
+    if (!pfs.initialized) return false;
+    return (coord_x >= 0 && coord_x < pfs.grid_width && coord_y >= 0 && coord_y < pfs.grid_height);
+}
+
+function world_to_grid(wx, wy) {
     return {
-        x: grid_x * global.pathfinding.node_grid_size + global.pathfinding.node_grid_size / 2,
-        y: grid_y * global.pathfinding.node_grid_size + global.pathfinding.node_grid_size / 2
+        x: floor(wx / GRID_CELL_SIZE),
+        y: floor(wy / GRID_CELL_SIZE)
     };
 }
 
-function process_path_queue() {
-    var max_paths_per_frame = 3;
-    var paths_processed = 0;
+function grid_to_world(gx, gy) {
+    return {
+        x: (gx * GRID_CELL_SIZE) + (GRID_CELL_SIZE * 0.5),
+        y: (gy * GRID_CELL_SIZE) + (GRID_CELL_SIZE * 0.5)
+    };
+}
 
-    while (!ds_queue_empty(global.pathfinding.path_queue) && paths_processed < max_paths_per_frame) {
-        var request = ds_queue_dequeue(global.pathfinding.path_queue);
-        find_path(request.start_x, request.start_y, request.end_x, request.end_y, request.entity);
-        paths_processed++;
+/****************************************************************************
+ * 5) FIND A WALKABLE CELL NEAR
+ ****************************************************************************/
+function find_walkable_point_near(grid_x, grid_y, world_x, world_y) {
+    var pfs = global.PathfindingSystem;
+    var search_radius = 2;
+    var candidates = [];
+    
+    for (var r = 1; r <= search_radius; r++) {
+        for (var dx = -r; dx <= r; dx++) {
+            for (var dy = -r; dy <= r; dy++) {
+                var tx = grid_x + dx;
+                var ty = grid_y + dy;
+                
+                if (validate_grid_coordinates(tx, ty)) {
+                    if (ds_grid_get(pfs.nav_grid, tx, ty) == NAV_CELL_WALKABLE &&
+                        !ds_grid_get(pfs.collision_cache, tx, ty)) {
+                        var test_world = grid_to_world(tx, ty);
+                        array_push(candidates, {
+                            grid:  { x: tx, y: ty },
+                            world: test_world
+                        });
+                    }
+                }
+            }
+        }
     }
+    
+    if (array_length(candidates) <= 0) return undefined;
+    
+    // Return whichever is physically closest
+    var best_index = -1;
+    var best_dist  = 9999999;
+    for (var i = 0; i < array_length(candidates); i++) {
+        var c = candidates[i];
+        var dist = point_distance(c.world.x, c.world.y, world_x, world_y);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_index = i;
+        }
+    }
+    return candidates[best_index];
+}
+
+/****************************************************************************
+ * 6) MAIN PATHFINDING WITH A*
+ ****************************************************************************/
+function pathfinding_find_path(start_x, start_y, end_x, end_y, requesting_entity = undefined) {
+    var pfs = global.PathfindingSystem;
+    if (!pfs.initialized || pfs.nav_grid == undefined) return [];
+    
+    // Check if entity is in desperate mode
+    var ignore_entities = false;
+    var in_narrow_space = false;
+    
+    if (requesting_entity != undefined) {
+        if (!variable_instance_exists(requesting_entity, "path_fail_counter")) {
+            requesting_entity.path_fail_counter = 0;
+            requesting_entity.consecutive_failures = 0;
+        }
+        
+        // Check for narrow space
+        var near_walls = 0;
+        with(requesting_entity) {
+            for (var wx = -1; wx <= 1; wx++) {
+                for (var wy = -1; wy <= 1; wy++) {
+                    if (wx == 0 && wy == 0) continue;
+                    if (place_meeting(x + wx * GRID_CELL_SIZE, y + wy * GRID_CELL_SIZE, obj_collision)) {
+                        near_walls++;
+                    }
+                }
+            }
+        }
+        in_narrow_space = (near_walls >= 3);
+        
+        show_debug_message("PF: Entity " + string(requesting_entity.id) + 
+                          " near_walls=" + string(near_walls) +
+                          " consecutive_failures=" + string(requesting_entity.consecutive_failures) +
+                          " path_fail_counter=" + string(requesting_entity.path_fail_counter));
+        
+        // Lower threshold for desperate mode in narrow spaces
+        var desperate_threshold = in_narrow_space ? 2 : 3;
+        
+        if (requesting_entity.consecutive_failures >= desperate_threshold) {
+            ignore_entities = true;
+            show_debug_message("PF: Entity " + string(requesting_entity.id) + 
+                             " DESPERATE MODE ACTIVATED - ignoring entities");
+        }
+    }
+    
+    // Convert world coordinates to grid
+    var start_g = world_to_grid(start_x, start_y);
+    var end_g   = world_to_grid(end_x, end_y);
+    
+    // Validate coordinates
+    if (!validate_grid_coordinates(start_g.x, start_g.y) ||
+        !validate_grid_coordinates(end_g.x, end_g.y)) {
+        show_debug_message("PF: Invalid grid coords");
+        return [];
+    }
+    
+    // If those cells are blocked, find near walkable
+    var start_pos = undefined;
+    var end_pos = undefined;
+    
+    if (ds_grid_get(pfs.nav_grid, start_g.x, start_g.y) == NAV_CELL_UNWALKABLE) {
+        start_pos = find_walkable_point_near(start_g.x, start_g.y, start_x, start_y);
+    }
+    if (ds_grid_get(pfs.nav_grid, end_g.x, end_g.y) == NAV_CELL_UNWALKABLE) {
+        end_pos = find_walkable_point_near(end_g.x, end_g.y, end_x, end_y);
+    }
+    
+    if (start_pos != undefined) start_g = start_pos.grid;
+    if (end_pos != undefined) end_g = end_pos.grid;
+    
+    // Only check for unwalkable cells
+    if (ds_grid_get(pfs.nav_grid, start_g.x, start_g.y) == NAV_CELL_UNWALKABLE ||
+        ds_grid_get(pfs.nav_grid, end_g.x, end_g.y) == NAV_CELL_UNWALKABLE) {
+        show_debug_message("PF: Start or end unwalkable");
+        return [];
+    }
+    
+    // A* preparation
+    var open_set = ds_priority_create();
+    ds_grid_resize(pfs.visit_map,    pfs.grid_width, pfs.grid_height);
+    ds_grid_resize(pfs.g_cost_map,   pfs.grid_width, pfs.grid_height);
+    ds_grid_resize(pfs.parent_x_map, pfs.grid_width, pfs.grid_height);
+    ds_grid_resize(pfs.parent_y_map, pfs.grid_width, pfs.grid_height);
+    
+    ds_grid_clear(pfs.visit_map,    PF_VISIT_NONE);
+    ds_grid_clear(pfs.g_cost_map,   PF_INIT_COST);
+    ds_grid_clear(pfs.parent_x_map, -1);
+    ds_grid_clear(pfs.parent_y_map, -1);
+    
+    ds_grid_set(pfs.g_cost_map, start_g.x, start_g.y, 0);
+    ds_priority_add(open_set, coords_to_index(start_g.x, start_g.y), 0);
+    
+    var start_time = get_timer();
+    var iterations = 0;
+    
+    // A* loop
+    while (!ds_priority_empty(open_set)) {
+        iterations++;
+        if (iterations > PF_MAX_ITERATIONS) {
+            show_debug_message("PF: Exceeded max iterations " + string(PF_MAX_ITERATIONS));
+            break;
+        }
+        if ((get_timer() - start_time) > PF_MAX_TIME_MS * 1000) {
+            show_debug_message("PF: Exceeded max time " + string(PF_MAX_TIME_MS) + "ms");
+            break;
+        }
+        
+        var current_index = ds_priority_delete_min(open_set);
+        var current = index_to_coords(current_index);
+        
+        if (current.x == end_g.x && current.y == end_g.y) {
+            var final_path = __pf_reconstruct_path(current.x, current.y);
+            ds_priority_destroy(open_set);
+            show_debug_message("PF: Path found with " + string(array_length(final_path)) + " points");
+            return final_path;
+        }
+        
+        var current_g = ds_grid_get(pfs.g_cost_map, current.x, current.y);
+        
+        // Expand neighbors
+        for (var d = 0; d < array_length(PF_DIRECTIONS); d++) {
+            var dir = PF_DIRECTIONS[d];
+            var nx = current.x + dir.dx;
+            var ny = current.y + dir.dy;
+            
+            if (!validate_grid_coordinates(nx, ny)) continue;
+            
+            var cell_value = ds_grid_get(pfs.nav_grid, nx, ny);
+            if (cell_value == NAV_CELL_UNWALKABLE) continue;
+            
+            // Special handling for entity cells in desperate mode
+            if (cell_value == NAV_CELL_ENTITY_PRESENT) {
+                if (!ignore_entities) continue;
+                // If desperate, allow pathing through entities but with a cost
+                move_cost *= in_narrow_space ? 1.5 : 2.0;  // Lower penalty in narrow spaces
+            } else {
+                var move_cost = dir.cost;
+            }
+            
+            // Check cached collision
+            if (ds_grid_get(pfs.collision_cache, nx, ny)) continue;
+            
+            // Simple diagonal check
+            if (abs(dir.dx) == 1 && abs(dir.dy) == 1) {
+                if (ds_grid_get(pfs.nav_grid, current.x + dir.dx, current.y) == NAV_CELL_UNWALKABLE &&
+                    ds_grid_get(pfs.nav_grid, current.x, current.y + dir.dy) == NAV_CELL_UNWALKABLE) {
+                    continue;
+                }
+            }
+            
+            var new_g = current_g + move_cost;
+            if (new_g < ds_grid_get(pfs.g_cost_map, nx, ny)) {
+                ds_grid_set(pfs.g_cost_map, nx, ny, new_g);
+                ds_grid_set(pfs.parent_x_map, nx, ny, current.x);
+                ds_grid_set(pfs.parent_y_map, nx, ny, current.y);
+                
+                // Manhattan distance heuristic
+                var h_cost = 10 * (abs(end_g.x - nx) + abs(end_g.y - ny));
+                ds_priority_add(open_set, coords_to_index(nx, ny), new_g + h_cost);
+            }
+        }
+    }
+    
+    show_debug_message("PF: No path found");
+    ds_priority_destroy(open_set);
+    return [];
+}
+
+/****************************************************************************
+ * 7) PATH RECONSTRUCTION
+ ****************************************************************************/
+function __pf_reconstruct_path(end_gx, end_gy) {
+    var pfs = global.PathfindingSystem;
+    var path = [];
+    
+    var cx = end_gx;
+    var cy = end_gy;
+    var count = 0;
+    
+    while (cx != -1 && cy != -1) {
+        var pt = grid_to_world(cx, cy);
+        array_push(path, pt);
+        count++;
+        
+        if (count > PF_MAX_ITERATIONS) {
+            show_debug_message("PF: Reconstruct path exceeded max iterations!");
+            break;
+        }
+        
+        var px = ds_grid_get(pfs.parent_x_map, cx, cy);
+        var py = ds_grid_get(pfs.parent_y_map, cx, cy);
+        
+        if (px == cx && py == cy) {
+            show_debug_message("PF: Loop detected in reconstruction!");
+            break;
+        }
+        
+        cx = px;
+        cy = py;
+    }
+    
+    array_reverse(path);
+    return smooth_path(path);  // Using your existing smooth_path function
 }

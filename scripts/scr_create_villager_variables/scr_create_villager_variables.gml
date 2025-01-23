@@ -2,7 +2,6 @@ function create_villager_variables() {
     // Basic state variables
     initialized = false;  // Use the same variable name as in the Step event
     npc_state = "search";
-    search_state = "";
 
     // Movement properties
     move_speed = 3;

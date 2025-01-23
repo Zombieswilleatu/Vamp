@@ -1,101 +1,135 @@
-function scr_handle_npc_collision(entity) {
-    if (!instance_exists(entity)) return;
+/// @function check_entity_collision(entity, test_x, test_y, ignore_ids = [])
+/// @description Checks for collisions with other entities at a test position
+/// @returns {Array} Array of colliding entity IDs, empty if none
+function check_entity_collision(entity, test_x, test_y, ignore_ids = []) {
+    var colliding_entities = [];
     
-    // Only process collisions if entities are close enough
-    var check_radius = 64; // Adjust based on entity sizes
-    var nearby_count = 0;
-    var processing_needed = false;
+    // Store original position
+    var orig_x = entity.x;
+    var orig_y = entity.y;
     
-    // Calculate entity center points
-    var entity_center_x = entity.bbox_left + (entity.bbox_right - entity.bbox_left) / 2;
-    var entity_center_y = entity.bbox_top + (entity.bbox_bottom - entity.bbox_top) / 2;
+    // Temporarily move to test position
+    entity.x = test_x;
+    entity.y = test_y;
     
-    with (obj_entity_root) {
-        if (id != entity.id) {
-            var other_center_x = bbox_left + (bbox_right - bbox_left) / 2;
-            var other_center_y = bbox_top + (bbox_bottom - bbox_top) / 2;
-            
-            if (point_distance(other_center_x, other_center_y, entity_center_x, entity_center_y) < check_radius) {
-                nearby_count++;
-                if (nearby_count > 3) {
-                    processing_needed = true;
-                    break;
-                }
+    // Check for collisions with other entities
+    with(obj_entity_root) {
+        if (id != entity.id && !array_contains(ignore_ids, id)) {  // Don't check against self or ignored entities
+            if (place_meeting(x, y, entity)) {
+                array_push(colliding_entities, id);
             }
         }
     }
     
-    if (!processing_needed) return;
+    // Restore original position
+    entity.x = orig_x;
+    entity.y = orig_y;
     
-    // Reset push forces for the entity
-    with (entity) {
-        push_x = 0;
-        push_y = 0;
+    return colliding_entities;
+}
+
+/// @function get_nearby_entities(x, y, radius, ignore_ids = [])
+/// @description Gets all entities within a radius for pathfinding consideration
+/// @returns {Array} Array of nearby entity data
+function get_nearby_entities(x, y, radius, ignore_ids = []) {
+    var nearby = [];
+    
+    with(obj_entity_root) {
+        if (!array_contains(ignore_ids, id)) {  // Skip ignored entities
+            var center_x = bbox_left + (bbox_right - bbox_left) / 2;
+            var center_y = bbox_top + (bbox_bottom - bbox_top) / 2;
+            
+            var dist = point_distance(center_x, center_y, x, y);
+            if (dist < radius) {
+                array_push(nearby, {
+                    id: id,
+                    x: center_x,
+                    y: center_y,
+                    bbox_width: bbox_right - bbox_left,
+                    bbox_height: bbox_bottom - bbox_top,
+                    distance: dist
+                });
+            }
+        }
     }
     
-    // Number of separation passes based on cluster size
-    var separation_passes = min(3, nearby_count - 1);
+    // Sort by distance for priority processing
+    array_sort(nearby, function(a, b) {
+        return a.distance - b.distance;
+    });
     
-    for (var pass = 0; pass < separation_passes; pass++) {
-        with (obj_entity_root) {
-            if (id != entity.id) {
-                var other_center_x = bbox_left + (bbox_right - bbox_left) / 2;
-                var other_center_y = bbox_top + (bbox_bottom - bbox_top) / 2;
-                
-                if (point_distance(other_center_x, other_center_y, entity_center_x, entity_center_y) < check_radius) {
-                    var overlap = rectangle_rectangle_collision(
-                        entity.bbox_left, entity.bbox_top, entity.bbox_right, entity.bbox_bottom,
-                        bbox_left, bbox_top, bbox_right, bbox_bottom
-                    );
-                    
-                    if (overlap) {
-                        var dx = entity_center_x - other_center_x;
-                        var dy = entity_center_y - other_center_y;
-                        var dist = point_distance(0, 0, dx, dy);
-                        
-                        if (dist > 0) {
-                            // Calculate push force based on overlap and distance
-                            var push_force = (check_radius - dist) / check_radius;
-                            var push_angle = point_direction(other_center_x, other_center_y, 
-                                                          entity_center_x, entity_center_y);
-                            
-                            with (entity) {
-                                push_x += lengthdir_x(2 * push_force, push_angle);
-                                push_y += lengthdir_y(2 * push_force, push_angle);
-                            }
+    return nearby;
+}
+
+/// @function update_nav_grid_with_entities(ignore_ids = [])
+/// @description Updates the navigation grid with current entity positions
+function update_nav_grid_with_entities(ignore_ids = []) {
+    var pfs = global.PathfindingSystem;
+    if (!pfs.initialized || pfs.nav_grid == undefined) return;
+    
+    // Clear previous entity markers
+    for (var gx = 0; gx < pfs.grid_width; gx++) {
+        for (var gy = 0; gy < pfs.grid_height; gy++) {
+            if (ds_grid_get(pfs.nav_grid, gx, gy) == NAV_CELL_ENTITY_PRESENT) {
+                ds_grid_set(pfs.nav_grid, gx, gy, NAV_CELL_WALKABLE);
+            }
+        }
+    }
+    
+    // Mark cells with entities
+    with(obj_entity_root) {
+        if (!array_contains(ignore_ids, id)) {  // Skip ignored entities
+            // Get grid coordinates for entity bounds
+            var grid_left   = floor(bbox_left / GRID_CELL_SIZE);
+            var grid_right  = floor(bbox_right / GRID_CELL_SIZE);
+            var grid_top    = floor(bbox_top / GRID_CELL_SIZE);
+            var grid_bottom = floor(bbox_bottom / GRID_CELL_SIZE);
+            
+            // Mark cells
+            for (var gx = grid_left; gx <= grid_right; gx++) {
+                for (var gy = grid_top; gy <= grid_bottom; gy++) {
+                    if (validate_grid_coordinates(gx, gy)) {
+                        if (ds_grid_get(pfs.nav_grid, gx, gy) == NAV_CELL_WALKABLE) {
+                            ds_grid_set(pfs.nav_grid, gx, gy, NAV_CELL_ENTITY_PRESENT);
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/// @function should_repath_for_entities(entity, path, ignore_ids = [])
+/// @description Checks if we need to repath due to entity positions
+/// @returns {Boolean} true if repathing is recommended
+function should_repath_for_entities(entity, path, ignore_ids = []) {
+    if (array_length(path) < 2) return false;
+    
+    // Look ahead a few waypoints
+    var look_ahead = min(3, array_length(path) - 1);
+    var check_radius = GRID_CELL_SIZE * 2; // Adjust based on needs
+    
+    for (var i = 1; i <= look_ahead; i++) {
+        var waypoint = path[i];
+        var nearby = get_nearby_entities(waypoint.x, waypoint.y, check_radius, ignore_ids);
         
-        // Apply movement with wall collision check using adjusted bbox
-        with (entity) {
-            // Calculate the offset from center to top-left corner
-            var half_width = (bbox_right - bbox_left) / 2;
-            var half_height = (bbox_bottom - bbox_top) / 2;
-            
-            // Adjust collision check position to account for entity's center point
-            var check_x = x + push_x;
-            var check_y = y + push_y;
-            
-            // Create a temporary collision mask at the potential new position
-            var can_move_x = !collision_rectangle(
-                check_x - half_width, bbox_top,
-                check_x + half_width, bbox_bottom,
-                obj_collision, false, true
-            );
-            
-            var can_move_y = !collision_rectangle(
-                bbox_left, check_y - half_height,
-                bbox_right, check_y + half_height,
-                obj_collision, false, true
-            );
-            
-            if (can_move_x) x += push_x;
-            if (can_move_y) y += push_y;
-            if (!can_move_x) push_x = 0;
-            if (!can_move_y) push_y = 0;
+        // If too many entities near upcoming waypoint, suggest repathing
+        if (array_length(nearby) >= 2) {  // Adjust threshold as needed
+            return true;
+        }
+        
+        // Check if direct path to waypoint is blocked by entities
+        var collision_entities = check_entity_collision(
+            entity,
+            waypoint.x,
+            waypoint.y,
+            ignore_ids
+        );
+        
+        if (array_length(collision_entities) > 0) {
+            return true;
         }
     }
+    
+    return false;
 }

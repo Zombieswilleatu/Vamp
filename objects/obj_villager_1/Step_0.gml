@@ -1,17 +1,10 @@
-if (!variable_instance_exists(id, "initialized") || !initialized) exit;
+/// @desc STEP EVENT
+// Update state machine
+scr_enemy_behavior();
 
-// Check for emergency unstuck logic
-var emergency_unstuck = scr_handle_stuck(self);
-
-// If not stuck, handle regular follow logic
-if (!emergency_unstuck) {
-    scr_npc_follow(); // Pathfinding movement
-    scr_handle_npc_collision(self); // Collision resolution
-    
-    // Calculate movement for animation
-    var move_h = x - xprevious;
-    var move_v = y - yprevious;
-    scr_npc_animation(move_h, move_v);  // Pass movement values
+// Update animation based on current state
+if (npc_state == "search") {
+    scr_npc_animation(search_last_move_x, search_last_move_y);
+} else if (npc_state == "follow") {
+    scr_npc_animation(follow_last_move_x, follow_last_move_y);
 }
-
-scr_fade_control(self); // Handle fading effects

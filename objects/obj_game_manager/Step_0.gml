@@ -44,3 +44,8 @@ global.fps = fps_real;
 if (fps_real < 60) {
     show_debug_message("FPS Warning: " + string(fps_real) + " at Frame: " + string(global.current_frame));
 }
+
+// In obj_game_controller Step Event or similar
+if (instance_exists(obj_player)) {  // Only process if game is running
+    process_pathfinding_queue();
+}
