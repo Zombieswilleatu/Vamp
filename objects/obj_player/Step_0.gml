@@ -1,47 +1,22 @@
-// Step Event for obj_player
-
-// Inherit from parent first
+// Player Step Event
 event_inherited();
-// Before calling the script
-// At the beginning of the Step Event
-show_debug_message("Player position: (" + string(x) + ", " + string(y) + ")");
-show_debug_message("Player speed: (" + string(hspeed) + ", " + string(vspeed) + ")");
 
-// After the movement and collision handling
-show_debug_message("Player position after movement: (" + string(x) + ", " + string(y) + ")");
-show_debug_message("Player speed after movement: (" + string(hspeed) + ", " + string(vspeed) + ")");
-
-// Check for collisions with obj_collision
-var collision_wall = place_meeting(x + hspeed, y + vspeed, obj_collision);
-
-if (collision_wall) {
-    show_debug_message("Collided with wall at (" + string(x) + ", " + string(y) + ")");
-    // Handle collision response here
-} else {
-    show_debug_message("No collision with wall");
-}
-
-// Save current position
-var previous_x = x;
-var previous_y = y;
-
-// Handle player movement based on input (Arrows OR WASD)
+// Input handling
 var h_input = (keyboard_check(vk_right) || keyboard_check(ord("D"))) - (keyboard_check(vk_left) || keyboard_check(ord("A")));
 var v_input = (keyboard_check(vk_down) || keyboard_check(ord("S"))) - (keyboard_check(vk_up) || keyboard_check(ord("W")));
 
-// Calculate intended movement
-var intended_hspeed = 0;
-var intended_vspeed = 0;
+// Movement calculation
+var intended_dir = 0;
+is_moving = (h_input != 0 || v_input != 0);
 
-if (h_input != 0 || v_input != 0) {
-    // Normalize diagonal movement
-    var len = sqrt(h_input * h_input + v_input * v_input);
-    intended_hspeed = (h_input / len) * move_speed;
-    intended_vspeed = (v_input / len) * move_speed;
-    is_moving = true;
+if (is_moving) {
+    // Calculate movement direction and normalize
+    intended_dir = point_direction(0, 0, h_input, v_input);
+    dir = intended_dir;
     
-    // Animation direction handling remains the same
+    // Animation handling based on primary movement direction
     if (abs(h_input) > abs(v_input)) {
+        // Horizontal movement dominates
         if (h_input > 0) {
             current_anim_start = ANIM_WALK_RIGHT_START;
             current_anim_end = ANIM_WALK_RIGHT_END;
@@ -52,19 +27,72 @@ if (h_input != 0 || v_input != 0) {
             last_direction = "left";
         }
     } else {
-        if (v_input > 0) {
-            current_anim_start = ANIM_WALK_DOWN_START;
-            current_anim_end = ANIM_WALK_DOWN_END;
-            last_direction = "down";
-        } else {
+        // Vertical movement dominates
+        if (v_input < 0) { // Up movement
             current_anim_start = ANIM_WALK_UP_START;
             current_anim_end = ANIM_WALK_UP_END;
             last_direction = "up";
+        } else { // Down movement
+            current_anim_start = ANIM_WALK_DOWN_START;
+            current_anim_end = ANIM_WALK_DOWN_END;
+            last_direction = "down";
         }
     }
+    
+    // Calculate base movement
+    var move_speed_adjusted = move_speed;
+    if (h_input != 0 && v_input != 0) {
+        // Normalize diagonal movement
+        move_speed_adjusted *= 0.7071; // approximately 1/sqrt(2)
+    }
+    
+    var move_x = h_input * move_speed_adjusted;
+    var move_y = v_input * move_speed_adjusted;
+    
+    // Store current position for potential rollback
+    var previous_x = x;
+    var previous_y = y;
+    
+    // Wall collision handling
+    if (!place_meeting(x + move_x, y + move_y, obj_collision)) {
+        // Full movement possible
+        x += move_x;
+        y += move_y;
+    } else {
+        // Try horizontal then vertical movement
+        if (!place_meeting(x + move_x, y, obj_collision)) {
+            x += move_x;
+        }
+        if (!place_meeting(x, y + move_y, obj_collision)) {
+            y += move_y;
+        }
+    }
+    
+    // NPC collision handling with gentle pushing
+    var push_range = 32; // Detection range for NPCs
+    var push_strength = 2; // How strongly to push NPCs
+    
+    with (obj_entity_root) {
+        if (id != other.id) {
+            var dist = point_distance(x, y, other.x, other.y);
+            if (dist < push_range) {
+                // Calculate push direction
+                var push_dir = point_direction(other.x, other.y, x, y);
+                var push_amount = (push_range - dist) / push_range * push_strength;
+                
+                // Move NPC away from player
+                x += lengthdir_x(push_amount, push_dir);
+                y += lengthdir_y(push_amount, push_dir);
+                
+                // Slightly adjust player position in opposite direction
+                other.x -= lengthdir_x(push_amount * 0.2, push_dir);
+                other.y -= lengthdir_y(push_amount * 0.2, push_dir);
+            }
+        }
+    }
+    
 } else {
-    is_moving = false;
-    // Idle animation handling remains the same
+    // Idle animation handling
     switch(last_direction) {
         case "down":
             current_anim_start = ANIM_WALK_DOWN_START;
@@ -85,39 +113,7 @@ if (h_input != 0 || v_input != 0) {
     }
 }
 
-// Movement and collision handling
-if (is_moving) {
-    // Try full movement first
-    var can_move = !place_meeting(x + intended_hspeed, y + intended_vspeed, obj_collision);
-    
-    if (can_move) {
-        x += intended_hspeed;
-        y += intended_vspeed;
-    } else {
-        // Try horizontal movement
-        if (!place_meeting(x + intended_hspeed, y, obj_collision)) {
-            x += intended_hspeed;
-        }
-        
-        // Try vertical movement
-        if (!place_meeting(x, y + intended_vspeed, obj_collision)) {
-            y += intended_vspeed;
-        }
-    }
-    
-    // Handle NPC collisions with smoother separation
-    if (place_meeting(x, y, obj_villager_1)) {
-        var inst = instance_place(x, y, obj_villager_1);
-        if (inst != noone) {
-            var dir = point_direction(inst.x, inst.y, x, y);
-            var push_amount = 2; // Adjust this value as needed
-            x = previous_x + lengthdir_x(push_amount, dir);
-            y = previous_y + lengthdir_y(push_amount, dir);
-        }
-    }
-}
-
-// Handle animation
+// Animation update
 if (is_moving) {
     image_index += image_speed;
     if (image_index >= current_anim_end || image_index < current_anim_start) {
@@ -127,7 +123,7 @@ if (is_moving) {
     image_index = current_anim_start;
 }
 
-// Room boundary constraints adjusting for center origin
+// Room boundary constraints
 var half_width = sprite_width / 2;
 var half_height = sprite_height / 2;
 x = clamp(x, half_width, room_width - half_width);
