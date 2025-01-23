@@ -1,6 +1,6 @@
 // Create Event for obj_player
 event_inherited();
-move_speed = 2.75;
+move_speed = 3;
 hspeed = 0;
 vspeed = 0;
 sprite_index = spr_player1; // Updated to match your sprite name
@@ -15,4 +15,3 @@ current_anim_start = ANIM_WALK_DOWN_START;
 current_anim_end = ANIM_WALK_DOWN_END;
 is_moving = false;
 last_direction = "down";
-

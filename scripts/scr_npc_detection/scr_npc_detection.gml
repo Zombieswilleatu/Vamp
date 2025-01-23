@@ -76,31 +76,27 @@ function update_npc_detection() {
     can_see_player = false;
     can_detect_player = false;
 
-    // Calculate detection rate based on proximity: closer = faster detection fill
+    // Calculate detection rate based on proximity
     var proximity_rate_modifier = 1 + (detection_radius / max(1, dist_to_player));
 
-    // Check if player is within hearing range (detection_radius)
+    // Check if player is within hearing range
     if (dist_to_player <= detection_radius) {
-        can_detect_player = true;  // Player is within hearing range
+        can_detect_player = true;
     }
 
     // Vision cone detection
     if (dist_to_player <= vision_range) {
         var dir_to_player = point_direction(x, y, obj_player.x, obj_player.y);
-        
-        // Add a small buffer to the angle check to catch edge cases
-        var angle_buffer = 10;  // Buffer in degrees to catch edge cases
         var angle_diff = angle_difference(vision_direction, dir_to_player);
 
-        // Allow a small buffer on the cone edges for detection
-        if (abs(angle_diff) <= (vision_angle / 2) + angle_buffer) {
+        if (abs(angle_diff) <= (vision_angle / 2) + 10) {
             if (is_line_of_sight_clear(x, y, obj_player.x, obj_player.y, 8)) {
                 can_see_player = true;
             }
         }
     }
 
-    // Update detection level based on proximity for both hearing and vision
+    // Update detection level
     if (can_see_player || can_detect_player) {
         var detection_rate = detection_increase_rate * proximity_rate_modifier;
         detection_level = min(100, detection_level + detection_rate);
@@ -110,9 +106,4 @@ function update_npc_detection() {
 
     // Update fully detected state
     fully_detected = (detection_level >= 100);
-
-    // Stay in follow state as long as detection level isn't empty
-    if (detection_level > 0 && npc_state == "follow") {
-        fully_detected = true;  // Remain in follow mode if detection is not 0
-    }
 }

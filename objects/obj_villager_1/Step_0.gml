@@ -1,6 +1,10 @@
-event_inherited();
-if (!variable_instance_exists(id, "initialized") || !initialized) exit;
-var emergency_unstuck = scr_handle_stuck(self);
-if (!emergency_unstuck) scr_npc_follow();
-scr_animate_npc(self);
-scr_fade_control(self);
+/// @desc STEP EVENT
+// Update state machine
+scr_enemy_behavior();
+
+// Update animation based on current state
+if (npc_state == "search") {
+    scr_npc_animation(search_last_move_x, search_last_move_y);
+} else if (npc_state == "follow") {
+    scr_npc_animation(follow_last_move_x, follow_last_move_y);
+}

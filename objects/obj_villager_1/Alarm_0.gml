@@ -1,30 +1,13 @@
-/// Alarm[0] - Check for grid initialization
-// This alarm handles the initial grid check and full initialization
-
-// Check for required global variables
-if (!variable_global_exists("path_grid") ||
-    global.path_grid == undefined) {
-    show_debug_message("Still waiting for grid initialization...");
-    alarm[0] = 1;
+if (!variable_global_exists("cell_size") || !variable_global_exists("nav_grid")) {
+    show_debug_message("Alarm[0] - Waiting for core initialization...");
+    alarm[0] = 60;
     exit;
 }
 
-// If we get here, grids are ready - do full initialization
-if (!initialized) {
-    // Create path if it doesn't exist
-    if (!path_exists(my_path)) {
-        my_path = path_add();
-    }
-
-    // Initialize variables
-    create_villager_variables();
-    create_debug_variables();
-    create_detection_variables(); // Ensure this function exists
-
-    // Mark as initialized
-    initialized = true;
-    show_debug_message("Villager fully initialized after grid check!");
-    
-    // Start region check or other necessary processes
-    alarm[1] = 1;
-}
+show_debug_message("Alarm[0] - All checks passed, initializing villager");
+create_detection_variables(); // Ensure detection variables are initialized first
+create_debug_variables();     // Then debug variables
+create_villager_variables();
+initialized = true;
+show_debug_message("Villager fully initialized - ID: " + string(id));
+alarm[1] = 1;

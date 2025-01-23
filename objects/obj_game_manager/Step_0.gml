@@ -1,9 +1,10 @@
-/// @description Game Manager Step Event
-
 // ESC to quit game
 if (keyboard_check_pressed(vk_escape)) {
     game_end();
 }
+
+// Increment the frame counter
+global.current_frame += 1;
 
 // Get current camera
 var cam = view_camera[0];
@@ -20,7 +21,7 @@ if (keyboard_check_pressed(vk_add)) {
     var new_height = cam_h * 0.9;
     var new_x = cam_x + (cam_w - new_width) / 2;
     var new_y = cam_y + (cam_h - new_height) / 2;
-    
+
     camera_set_view_size(cam, new_width, new_height);
     camera_set_view_pos(cam, new_x, new_y);
 }
@@ -31,7 +32,20 @@ if (keyboard_check_pressed(vk_subtract)) {
     var new_height = cam_h * 1.1;
     var new_x = cam_x - (new_width - cam_w) / 2;
     var new_y = cam_y - (new_height - cam_h) / 2;
-    
+
     camera_set_view_size(cam, new_width, new_height);
     camera_set_view_pos(cam, new_x, new_y);
+}
+
+// Update FPS using fps_real
+global.fps = fps_real;
+
+// Debug FPS Warning
+if (fps_real < 60) {
+    show_debug_message("FPS Warning: " + string(fps_real) + " at Frame: " + string(global.current_frame));
+}
+
+// In obj_game_controller Step Event or similar
+if (instance_exists(obj_player)) {  // Only process if game is running
+    process_pathfinding_queue();
 }
