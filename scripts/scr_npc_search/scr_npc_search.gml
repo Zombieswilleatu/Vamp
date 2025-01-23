@@ -214,9 +214,12 @@ function mark_area_searched(grid_x, grid_y) {
 }
 
 /// @desc Update NPC search behavior
-/// @param {Id.Instance} inst Instance to update
 function npc_search_update(inst) {
     with (inst) {
+        // Initialize search_idle_active if it doesn't exist
+        if (!variable_instance_exists(id, "search_idle_active")) {
+            search_idle_active = false;
+        }
         
         // If not already set, define search_fresh_start
         if (!variable_instance_exists(id, "search_fresh_start")) {
@@ -363,9 +366,23 @@ function npc_search_update(inst) {
         // If no path or we reached old search target, request new location
         if (pathfinding_delay_timer > 0) {
             pathfinding_delay_timer--;
-        } else if ((!follow_has_valid_path ||
-                    point_distance(x, y, search_target_x, search_target_y) < SEARCH_AREA_SIZE / 2) &&
-                    emergency_unstuck_cooldown <= 0) {
+        } else if (!search_idle_active && // Only proceed if not in idle
+                  (!follow_has_valid_path ||
+                   (array_length(follow_path) > 0 && follow_path_index >= array_length(follow_path))) &&
+                   emergency_unstuck_cooldown <= 0) {
+            
+            // Only enter idle if we successfully completed our path
+            if (follow_has_valid_path && 
+                array_length(follow_path) > 0 && 
+                follow_path_index >= array_length(follow_path)) {
+                search_idle_active = true;
+                idle_state_timer = 0;
+                idle_initialized = false;
+                vx = 0;
+                vy = 0;
+                show_debug_message("Path complete - entering search-idle state");
+                return;
+            }
             
             var new_location = find_unsearched_location(id);
             if (new_location != undefined) {
@@ -391,8 +408,11 @@ function npc_search_update(inst) {
             }
         }
         
-        // Move along path if valid
-        if (follow_has_valid_path && array_length(follow_path) > 0 && emergency_unstuck_cooldown <= 0) {
+        // Move along path if valid and not in idle
+        if (!search_idle_active && 
+            follow_has_valid_path && 
+            array_length(follow_path) > 0 && 
+            emergency_unstuck_cooldown <= 0) {
             
             // Current NPC center
             var _current_point = {
@@ -401,15 +421,6 @@ function npc_search_update(inst) {
             };
             
             if (follow_path_index < 0) follow_path_index = 0;
-            
-            if (follow_path_index >= array_length(follow_path)) {
-                follow_has_valid_path = false;
-                vx = 0;
-                vy = 0;
-                show_debug_message("Path index out of bounds, resetting path. Index: " + 
-                                   string(follow_path_index) + " Length: " + string(array_length(follow_path)));
-                return;
-            }
             
             // Next waypoint
             var _waypoint = follow_path[follow_path_index];
@@ -455,11 +466,16 @@ function npc_search_update(inst) {
                     follow_path_index++;
                     waypoint_failure_count = 0;
                     
-                    // Check if we're done
+                    // Check if we're done with the path
                     if (follow_path_index >= array_length(follow_path)) {
                         follow_has_valid_path = false;
                         vx = 0;
                         vy = 0;
+                        // Enter idle state when path is complete
+                        search_idle_active = true;
+                        idle_state_timer = 0;
+                        idle_initialized = false;
+                        show_debug_message("Path complete - entering search-idle state");
                         return;
                     }
                     _waypoint = follow_path[follow_path_index];

@@ -21,6 +21,12 @@ function get_idle_frame(direction) {
 }
 
 function scr_npc_animation(move_h, move_v) {
+    // If we're in any idle state, don't run normal animation logic
+    if ((npc_state == "idle" && idle_initialized) || 
+        (npc_state == "search" && search_idle_active && idle_initialized)) {
+        return; // Let the idle state handle animations
+    }
+    
     // Initialize instance variables if they don't exist
     if (!variable_instance_exists(id, "direction_change_timer")) {
         direction_change_timer = 0;

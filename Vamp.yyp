@@ -66,6 +66,7 @@
     {"id":{"name":"scr_npc_animation","path":"scripts/scr_npc_animation/scr_npc_animation.yy",},},
     {"id":{"name":"scr_npc_detection","path":"scripts/scr_npc_detection/scr_npc_detection.yy",},},
     {"id":{"name":"scr_npc_follow","path":"scripts/scr_npc_follow/scr_npc_follow.yy",},},
+    {"id":{"name":"scr_npc_idle","path":"scripts/scr_npc_idle/scr_npc_idle.yy",},},
     {"id":{"name":"scr_npc_init","path":"scripts/scr_npc_init/scr_npc_init.yy",},},
     {"id":{"name":"scr_npc_search","path":"scripts/scr_npc_search/scr_npc_search.yy",},},
     {"id":{"name":"scr_pathfinding_utils","path":"scripts/scr_pathfinding_utils/scr_pathfinding_utils.yy",},},

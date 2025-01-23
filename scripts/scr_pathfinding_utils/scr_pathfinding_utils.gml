@@ -156,137 +156,86 @@ function request_pathfinding(entity, start_x, start_y, end_x, end_y) {
     show_debug_message("PF: Queued pathfinding request for entity " + string(entity));
 }
 
-/// @function process_pathfinding_queue()
-/// @description Process queued pathfinding requests
+// Optimized pathfinding queue processing
 function process_pathfinding_queue() {
     var pfs = global.PathfindingSystem;
     
-    // Reset request counter if enough time has passed (simulating one frame at ~60fps)
-    if (get_timer() - pfs.frame_start_time > 16667) {
+    // More lenient frame time check (25ms instead of 16.6ms)
+    if (get_timer() - pfs.frame_start_time > 25000) {
         pfs.requests_this_frame = 0;
         pfs.frame_start_time = get_timer();
     }
     
-    // Process up to max_requests_per_frame
-    while (!ds_queue_empty(pfs.path_requests) && 
-           pfs.requests_this_frame < pfs.max_requests_per_frame) {
-           
-        var request = ds_queue_dequeue(pfs.path_requests);
+    // Increase max requests per frame
+    pfs.max_requests_per_frame = 5;  // Up from default
+    
+    // Process queue with priority for closer entities
+    var request_array = [];
+    while (!ds_queue_empty(pfs.path_requests)) {
+        array_push(request_array, ds_queue_dequeue(pfs.path_requests));
+    }
+    
+    // Sort by distance to target (closer first)
+    array_sort(request_array, function(a, b) {
+        var dist_a = point_distance(a.start_x, a.start_y, a.end_x, a.end_y);
+        var dist_b = point_distance(b.start_x, b.start_y, b.end_x, b.end_y);
+        return dist_a - dist_b;
+    });
+    
+    // Process sorted requests
+    var processed = 0;
+    for (var i = 0; i < array_length(request_array); i++) {
+        if (processed >= pfs.max_requests_per_frame) {
+            // Re-queue remaining requests
+            for (var j = i; j < array_length(request_array); j++) {
+                ds_queue_enqueue(pfs.path_requests, request_array[j]);
+            }
+            break;
+        }
         
-        // Process the request
+        var request = request_array[i];
+        
         with (request.entity) {
+            // Skip if too close
+            if (point_distance(temp_current_x, temp_current_y, temp_target_x, temp_target_y) < 32) {
+                follow_has_valid_path = true;
+                follow_path = [{x: temp_target_x, y: temp_target_y}];
+                follow_path_index = 0;
+                continue;
+            }
+            
+            // Try cached path first
+            var cached_path = find_cached_path(temp_current_x, temp_current_y, temp_target_x, temp_target_y);
+            if (cached_path != undefined) {
+                follow_path = cached_path;
+                follow_has_valid_path = true;
+                follow_path_index = 0;
+                increment_path_cache_success(temp_current_x, temp_current_y, temp_target_x, temp_target_y);
+                continue;
+            }
+            
+            // Regular pathfinding
             var path = pathfinding_find_path(
-                temp_current_x, temp_current_y,  // NPC's current position
-                temp_target_x, temp_target_y,    // Target position
+                temp_current_x, temp_current_y,
+                temp_target_x, temp_target_y,
                 id
             );
             
-            show_debug_message("PF: Processing queued request. Path length: " + string(array_length(path)));
-            
-            // Handle the result
             if (array_length(path) > 0) {
-                // Smooth the path
                 path = smooth_path(path);
-                
-                // Store the smoothed path
                 follow_last_valid_path = path;
-                
-                // Check path orientation
-                var fp = path[0];
-                var lp = path[array_length(path) - 1];
-                
-                var dist_fp_to_npc = point_distance(fp.x, fp.y, temp_current_x, temp_current_y);
-                var dist_lp_to_npc = point_distance(lp.x, lp.y, temp_current_x, temp_current_y);
-                
-                // If the last point is actually closer to the NPC than the first,
-                // we consider the path reversed and flip it
-                if (dist_lp_to_npc < dist_fp_to_npc) {
-                    show_debug_message("PF: Queue processor reversing path direction");
-                    
-                    // 1) Reverse the path
-                    var reversed_path = [];
-                    for (var r = array_length(path) - 1; r >= 0; r--) {
-                        array_push(reversed_path, path[r]);
-                    }
-                    
-                    // 2) Find which waypoint in the reversed path is nearest to the NPC
-                    //    so we can continue from there instead of jumping to reversed_path[0]
-                    var best_idx = 0;
-                    var best_dist = 9999999;
-                    for (var i = 0; i < array_length(reversed_path); i++) {
-                        var test_dist = point_distance(
-                            reversed_path[i].x,
-                            reversed_path[i].y,
-                            temp_current_x,
-                            temp_current_y
-                        );
-                        if (test_dist < best_dist) {
-                            best_dist = test_dist;
-                            best_idx = i;
-                        }
-                    }
-                    
-                    // 3) Replace the old path with this reversed version
-                    path = reversed_path;
-                    follow_last_valid_path = reversed_path;
-                    
-                    // 4) We'll set follow_path_index to that best_idx
-                    //    so we don't snap to [0] in the new array
-                    follow_path_index = best_idx;
-                } else {
-                    // If we didn't flip, start from 0 by default
-                    follow_path_index = 0;
-                }
-                
-                // Optionally find a better best_index if we're already moving
-                var current_speed = point_distance(0, 0, vx, vy);
-                if (current_speed > 0.1) {
-                    var move_dir = point_direction(0, 0, vx, vy);
-                    var path_start_dir = point_direction(temp_current_x, temp_current_y, path[follow_path_index].x, path[follow_path_index].y);
-                    var dir_diff = abs(angle_difference(move_dir, path_start_dir));
-                    
-                    if (dir_diff > 90 && dir_diff < 150) {
-                        var check_points = min(2, array_length(path) - 1);
-                        for (var c = follow_path_index + 1; c <= follow_path_index + check_points; c++) {
-                            if (c >= array_length(path)) break;
-                            
-                            var point_dir = point_direction(temp_current_x, temp_current_y, path[c].x, path[c].y);
-                            var new_diff = abs(angle_difference(move_dir, point_dir));
-                            if (new_diff < dir_diff - 30) {
-                                follow_path_index = c;
-                                dir_diff = new_diff;
-                            }
-                        }
-                    }
-                }
-                
-                // Make sure we don't start at the very last point
-                if (follow_path_index >= array_length(path) - 1) {
-                    follow_path_index = array_length(path) - 2;
-                }
-                
-                // Cache the path for later
-                cache_path(temp_current_x, temp_current_y, temp_target_x, temp_target_y, path);
-                
-                // Finalize
                 follow_path = path;
                 follow_has_valid_path = true;
-                
-                path_target_x = temp_target_x;
-                path_target_y = temp_target_y;
-                last_valid_target_x = temp_target_x;
-                last_valid_target_y = temp_target_y;
-                
+                follow_path_index = 0;
+                cache_path(temp_current_x, temp_current_y, temp_target_x, temp_target_y, path);
             } else {
-                // No path found
                 follow_has_valid_path = false;
                 if (point_distance(x, y, temp_target_x, temp_target_y) > 200) {
                     npc_follow_try_fallback(id, x, y, last_valid_target_x, last_valid_target_y);
                 }
             }
         }
-        
-        pfs.requests_this_frame++;
+        processed++;
     }
 }
 

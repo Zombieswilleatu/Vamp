@@ -125,9 +125,11 @@ if (keyboard_check(vk_tab)) {
             );
         }
         
-        // Draw current target waypoint if we have a follow_path_index
+        // Draw current target waypoint if we have a valid follow_path_index
         if (variable_instance_exists(id, "follow_path_index") && 
+            follow_path_index >= 0 && 
             follow_path_index < array_length(follow_path)) {
+            
             draw_set_color(c_fuchsia);
             var current_point = follow_path[follow_path_index];
             draw_circle(current_point.x, current_point.y, 6, true);

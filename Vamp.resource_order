@@ -40,6 +40,7 @@
     {"name":"scr_npc_animation","order":10,"path":"scripts/scr_npc_animation/scr_npc_animation.yy",},
     {"name":"scr_npc_detection","order":3,"path":"scripts/scr_npc_detection/scr_npc_detection.yy",},
     {"name":"scr_npc_follow","order":1,"path":"scripts/scr_npc_follow/scr_npc_follow.yy",},
+    {"name":"scr_npc_idle","order":13,"path":"scripts/scr_npc_idle/scr_npc_idle.yy",},
     {"name":"scr_npc_init","order":2,"path":"scripts/scr_npc_init/scr_npc_init.yy",},
     {"name":"scr_npc_search","order":12,"path":"scripts/scr_npc_search/scr_npc_search.yy",},
     {"name":"scr_pathfinding_utils","order":5,"path":"scripts/scr_pathfinding_utils/scr_pathfinding_utils.yy",},
